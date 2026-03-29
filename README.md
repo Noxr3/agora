@@ -451,13 +451,11 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started.
 - Improve mobile layout on the live test panel
 - Add OpenAPI / JSON Schema validation for agent registration
 - Support A2A streaming (`text/event-stream`) in the test panel
-- Add MCP (Model Context Protocol) server support alongside A2A
 
 ---
 
 ## Roadmap
 
-- [ ] MCP (Model Context Protocol) server directory alongside A2A
 - [ ] Agent-to-agent call graph visualization
 - [ ] OAuth / API key authentication for agent registration
 - [ ] Webhook notifications when agent health status changes
