@@ -1,26 +1,136 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-geist);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-instrument-serif);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  /* Agora radius scale — purposefully low, civic not bubbly */
+  --radius-sm: 0.25rem;   /* 4px  — tags, badges */
+  --radius-md: 0.375rem;  /* 6px  — buttons, inputs */
+  --radius-lg: 0.5rem;    /* 8px  — cards, panels */
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ── Agora Design Tokens ─────────────────────────────────────────────────── */
+
+:root {
+  /* Stone warm background — #F5F3EF */
+  --background: oklch(0.966 0.006 75);
+  /* Pure white surface */
+  --foreground: oklch(0.148 0.008 44);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.148 0.008 44);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.148 0.008 44);
+
+  /* Terracotta primary — #C4622D */
+  --primary: oklch(0.535 0.137 42);
+  --primary-foreground: oklch(1 0 0);
+
+  /* Warm stone secondary */
+  --secondary: oklch(0.94 0.006 75);
+  --secondary-foreground: oklch(0.148 0.008 44);
+
+  /* Warm muted — #78716C area */
+  --muted: oklch(0.938 0.006 75);
+  --muted-foreground: oklch(0.52 0.012 50);
+
+  /* Accent = same as secondary */
+  --accent: oklch(0.94 0.006 75);
+  --accent-foreground: oklch(0.148 0.008 44);
+
+  /* Destructive — warm red */
+  --destructive: oklch(0.55 0.19 27);
+
+  /* Border — #E7E5E0 */
+  --border: oklch(0.915 0.008 75);
+  --input: oklch(0.915 0.008 75);
+  --ring: oklch(0.535 0.137 42);
+
+  /* Base radius (shadcn uses this) */
+  --radius: 0.375rem;
+
+  /* Sidebar */
+  --sidebar: oklch(0.966 0.006 75);
+  --sidebar-foreground: oklch(0.148 0.008 44);
+  --sidebar-primary: oklch(0.535 0.137 42);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.94 0.006 75);
+  --sidebar-accent-foreground: oklch(0.148 0.008 44);
+  --sidebar-border: oklch(0.915 0.008 75);
+  --sidebar-ring: oklch(0.535 0.137 42);
+}
+
+.dark {
+  /* Dark stone — #1C1917 */
+  --background: oklch(0.148 0.008 44);
+  --foreground: oklch(0.966 0.006 75);
+  --card: oklch(0.19 0.008 44);
+  --card-foreground: oklch(0.966 0.006 75);
+  --popover: oklch(0.19 0.008 44);
+  --popover-foreground: oklch(0.966 0.006 75);
+
+  /* Lighter terracotta for dark mode — #E07B46 */
+  --primary: oklch(0.658 0.14 44);
+  --primary-foreground: oklch(0.148 0.008 44);
+
+  --secondary: oklch(0.22 0.008 44);
+  --secondary-foreground: oklch(0.966 0.006 75);
+  --muted: oklch(0.22 0.008 44);
+  --muted-foreground: oklch(0.67 0.01 50);
+  --accent: oklch(0.22 0.008 44);
+  --accent-foreground: oklch(0.966 0.006 75);
+  --destructive: oklch(0.65 0.19 27);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.658 0.14 44);
+
+  --sidebar: oklch(0.19 0.008 44);
+  --sidebar-foreground: oklch(0.966 0.006 75);
+  --sidebar-primary: oklch(0.658 0.14 44);
+  --sidebar-primary-foreground: oklch(0.148 0.008 44);
+  --sidebar-accent: oklch(0.22 0.008 44);
+  --sidebar-accent-foreground: oklch(0.966 0.006 75);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.658 0.14 44);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground;
+  }
 }

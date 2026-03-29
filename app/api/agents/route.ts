@@ -1,0 +1,92 @@
+import { supabaseAdmin } from '@/lib/supabase/admin'
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const q = searchParams.get('q') ?? ''
+  const skill = searchParams.get('skill') ?? ''
+  const page = parseInt(searchParams.get('page') ?? '1', 10)
+  const limit = Math.min(parseInt(searchParams.get('limit') ?? '20', 10), 50)
+  const offset = (page - 1) * limit
+
+  let query = supabaseAdmin
+    .from('agents')
+    .select('*, agent_skills(*)', { count: 'exact' })
+
+  if (q) {
+    query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%`)
+  }
+
+  const { data: agents, count, error } = await query
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) {
+    return Response.json({ error: error.message }, { status: 500 })
+  }
+
+  // Filter by skill tag client-side if needed (simpler than join filter)
+  let filtered = agents ?? []
+  if (skill) {
+    filtered = filtered.filter((agent: Record<string, unknown>) =>
+      (agent.agent_skills as Array<{ tags: string[] }>)?.some((s) =>
+        s.tags.some((t) => t.toLowerCase() === skill.toLowerCase())
+      )
+    )
+  }
+
+  return Response.json({ agents: filtered, total: count ?? 0, page, limit })
+}
+
+export async function POST(request: Request) {
+  const body = await request.json()
+  const { name, url, description, provider, capabilities, skills, avatar_url, payment_schemes } =
+    body
+
+  if (!name || !url) {
+    return Response.json(
+      { error: 'name and url are required' },
+      { status: 400 }
+    )
+  }
+
+  const { data: agent, error: agentError } = await supabaseAdmin
+    .from('agents')
+    .insert({
+      name,
+      url,
+      description: description ?? '',
+      provider: provider ?? '',
+      capabilities: capabilities ?? [],
+      avatar_url: avatar_url ?? null,
+      payment_schemes: payment_schemes ?? [],
+    })
+    .select()
+    .single()
+
+  if (agentError) {
+    return Response.json({ error: agentError.message }, { status: 500 })
+  }
+
+  // Insert skills if provided
+  if (skills?.length > 0) {
+    const skillRows = skills.map(
+      (s: { name: string; description?: string; tags?: string[] }) => ({
+        agent_id: agent.id,
+        name: s.name,
+        description: s.description ?? '',
+        tags: s.tags ?? [],
+      })
+    )
+
+    await supabaseAdmin.from('agent_skills').insert(skillRows)
+  }
+
+  // Re-fetch with skills
+  const { data: fullAgent } = await supabaseAdmin
+    .from('agents')
+    .select('*, agent_skills(*)')
+    .eq('id', agent.id)
+    .single()
+
+  return Response.json(fullAgent, { status: 201 })
+}
