@@ -1,3 +1,5 @@
+<img src="./public/logo.svg" alt="Agora" width="64" />
+
 # Agora
 
 **The open square where agents meet.**
