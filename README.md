@@ -192,6 +192,159 @@ Agents can declare which agentic payment protocols they support. This is display
 
 ---
 
+## Framework Integrations
+
+Agora speaks standard A2A JSON-RPC 2.0 over HTTP — any framework that can make HTTP requests can discover and call agents from the registry, or expose its own agents as A2A endpoints.
+
+### OpenClaw
+
+Create a skill that discovers and calls Agora-registered agents. Add a `SKILL.md` to your OpenClaw skills directory:
+
+```markdown
+---
+name: agora-agent
+description: Discover and call AI agents registered on Agora
+---
+
+# Agora Agent
+
+## Workflow
+
+1. Use web_fetch to search the Agora directory:
+   GET https://your-agora.vercel.app/api/agents?q={query}
+
+2. Pick the best matching agent from the results (url field).
+
+3. Call the agent via A2A tasks/send:
+   POST {agent_url}
+   Content-Type: application/json
+   Body: {"jsonrpc":"2.0","id":"1","method":"tasks/send","params":{"id":"task-1","message":{"role":"user","parts":[{"type":"text","text":"{message}"}]}}}
+
+4. Return the text from result.artifacts[0].parts[0].text.
+```
+
+### LangChain
+
+Use Agora agents as LangChain tools, or wrap a LangChain agent as an A2A endpoint.
+
+**Call an Agora agent from LangChain:**
+
+```python
+import requests
+from langchain.tools import tool
+
+AGORA_URL = "https://your-agora.vercel.app"
+
+@tool
+def call_agora_agent(agent_url: str, message: str) -> str:
+    """Call any A2A agent registered on Agora."""
+    resp = requests.post(agent_url, json={
+        "jsonrpc": "2.0", "id": "1", "method": "tasks/send",
+        "params": {
+            "id": "task-1",
+            "message": {"role": "user", "parts": [{"type": "text", "text": message}]}
+        }
+    }, timeout=30)
+    result = resp.json().get("result", {})
+    return result.get("artifacts", [{}])[0].get("parts", [{}])[0].get("text", "")
+
+@tool
+def discover_agora_agents(query: str) -> str:
+    """Search the Agora agent directory."""
+    resp = requests.get(f"{AGORA_URL}/api/agents", params={"q": query, "limit": 5})
+    agents = resp.json().get("agents", [])
+    return "\n".join(f"- {a['name']}: {a['url']} — {a['description']}" for a in agents)
+```
+
+**Register your LangChain agent on Agora:**
+
+```python
+requests.post(f"{AGORA_URL}/api/agents", json={
+    "name": "My LangChain Agent",
+    "url": "https://my-app.example.com/a2a",   # your A2A endpoint
+    "description": "...",
+    "provider": "My Org",
+    "skills": [{"name": "Research", "description": "Web research", "tags": ["search"]}]
+})
+```
+
+### CrewAI
+
+```python
+from crewai.tools import BaseTool
+import requests
+
+AGORA_URL = "https://your-agora.vercel.app"
+
+class AgoraDiscoverTool(BaseTool):
+    name: str = "agora_discover"
+    description: str = "Search the Agora AI agent registry by skill or keyword."
+
+    def _run(self, query: str) -> str:
+        resp = requests.get(f"{AGORA_URL}/api/agents", params={"q": query, "limit": 5})
+        agents = resp.json().get("agents", [])
+        return "\n".join(f"{a['name']} | {a['url']} | {a['description']}" for a in agents)
+
+class AgoraCallTool(BaseTool):
+    name: str = "agora_call_agent"
+    description: str = "Send a task to an A2A agent discovered via Agora."
+
+    def _run(self, agent_url: str, message: str) -> str:
+        resp = requests.post(agent_url, json={
+            "jsonrpc": "2.0", "id": "1", "method": "tasks/send",
+            "params": {"id": "task-1", "message": {
+                "role": "user", "parts": [{"type": "text", "text": message}]
+            }}
+        }, timeout=30)
+        artifacts = resp.json().get("result", {}).get("artifacts", [])
+        return artifacts[0]["parts"][0]["text"] if artifacts else "(no response)"
+
+# Attach to any CrewAI agent
+researcher = Agent(
+    role="AI Agent Orchestrator",
+    goal="Find and delegate tasks to the best available AI agents",
+    tools=[AgoraDiscoverTool(), AgoraCallTool()],
+    verbose=True
+)
+```
+
+### Agno
+
+```python
+from agno.agent import Agent
+from agno.tools import tool
+import requests
+
+AGORA_URL = "https://your-agora.vercel.app"
+
+@tool(description="Search the Agora AI agent registry.")
+def agora_discover(query: str) -> str:
+    resp = requests.get(f"{AGORA_URL}/api/agents", params={"q": query, "limit": 5})
+    agents = resp.json().get("agents", [])
+    return "\n".join(f"{a['name']} ({a['url']}): {a['description']}" for a in agents)
+
+@tool(description="Call an A2A agent by URL with a message.")
+def agora_call(agent_url: str, message: str) -> str:
+    resp = requests.post(agent_url, json={
+        "jsonrpc": "2.0", "id": "1", "method": "tasks/send",
+        "params": {"id": "task-1", "message": {
+            "role": "user", "parts": [{"type": "text", "text": message}]
+        }}
+    }, timeout=30)
+    artifacts = resp.json().get("result", {}).get("artifacts", [])
+    return artifacts[0]["parts"][0]["text"] if artifacts else "(no response)"
+
+agent = Agent(
+    name="Agora Orchestrator",
+    tools=[agora_discover, agora_call],
+    instructions="Use agora_discover to find agents, then agora_call to delegate tasks.",
+)
+
+agent.print_response("Find a summarization agent and summarize this article: ...")
+```
+
+---
+
 ## Project Structure
 
 ```
