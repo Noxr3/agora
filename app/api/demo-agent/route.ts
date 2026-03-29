@@ -9,12 +9,39 @@ import type {
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
 
-const litellm = new OpenAI({
-  baseURL: process.env.LITELLM_BASE_URL ?? 'http://localhost:4000',
-  apiKey: process.env.LITELLM_API_KEY ?? 'no-key',
-})
+// ─── LLM client ───────────────────────────────────────────────────────────────
+// Priority:
+//   1. LiteLLM proxy  — set LITELLM_BASE_URL (+ optional LITELLM_API_KEY)
+//   2. OpenAI direct  — set OPENAI_API_KEY (fallback when no proxy configured)
+//
+// LiteLLM exposes an OpenAI-compatible API, so the same client works for both.
 
-const MODEL = process.env.DEMO_AGENT_MODEL ?? 'claude-opus-4-6'
+const litellmBaseUrl = process.env.LITELLM_BASE_URL
+const litellmApiKey  = process.env.LITELLM_API_KEY
+const openaiApiKey   = process.env.OPENAI_API_KEY
+
+function buildClient(): OpenAI {
+  if (litellmBaseUrl) {
+    // Route through LiteLLM proxy
+    return new OpenAI({
+      baseURL: litellmBaseUrl,
+      apiKey: litellmApiKey ?? 'no-key',  // LiteLLM doesn't require a real key
+    })
+  }
+  if (openaiApiKey) {
+    // Fall back to OpenAI directly
+    return new OpenAI({ apiKey: openaiApiKey })
+  }
+  // Neither configured — surface a clear error at request time rather than boot time
+  return new OpenAI({
+    baseURL: 'http://localhost:4000',
+    apiKey: 'unconfigured',
+  })
+}
+
+const llm = buildClient()
+
+const MODEL = process.env.DEMO_AGENT_MODEL ?? 'gpt-4o'
 const MAX_TOOL_ITERATIONS = 10
 
 // ─── In-memory session store ──────────────────────────────────────────────────
@@ -206,7 +233,7 @@ async function runAgentLoop(userText: string, sessionId?: string): Promise<strin
   ]
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-    const completion = await litellm.chat.completions.create({
+    const completion = await llm.chat.completions.create({
       model: MODEL,
       max_tokens: 4096,
       tools: TOOLS,
