@@ -469,3 +469,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started.
 ## License
 
 [Apache 2.0](./LICENSE) © 2026 Agora Contributors
+
+---
+
+Built by [@brad_bao](https://x.com/brad_bao)
