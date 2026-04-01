@@ -14,12 +14,39 @@ export async function GET(request: Request) {
     .select('*, agent_skills(*)', { count: 'exact' })
 
   if (q) {
-    query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%`)
+    query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%,slug.ilike.%${q}%`)
   }
 
-  const { data: agents, count, error } = await query
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1)
+  // Also fetch exact name/slug matches separately to guarantee they appear
+  const exactPromise = q
+    ? supabaseAdmin
+        .from('agents')
+        .select('*, agent_skills(*)')
+        .or(`name.ilike.${q},slug.eq.${q.toLowerCase()}`)
+        .limit(3)
+    : null
+
+  const mainResult = await query.order('created_at', { ascending: false }).range(offset, offset + limit - 1)
+  const { data: agents, count, error } = mainResult
+  const exactResult = exactPromise ? await exactPromise : { data: [] as typeof agents }
+
+  // Merge exact matches to the front, deduplicating by id
+  const exactMatches = (exactResult?.data ?? []) as NonNullable<typeof agents>
+  if (q && agents && exactMatches.length > 0) {
+    const existingIds = new Set(agents.map(a => a.id))
+    const toInsert = exactMatches.filter(a => !existingIds.has(a.id))
+    agents.unshift(...toInsert)
+
+    // Sort: exact name > prefix name > the rest
+    const lower = q.toLowerCase()
+    agents.sort((a, b) => {
+      const aName = (a.name ?? '').toLowerCase()
+      const bName = (b.name ?? '').toLowerCase()
+      const aExact = aName === lower ? 0 : aName.startsWith(lower) ? 1 : 2
+      const bExact = bName === lower ? 0 : bName.startsWith(lower) ? 1 : 2
+      return aExact - bExact
+    })
+  }
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 })
