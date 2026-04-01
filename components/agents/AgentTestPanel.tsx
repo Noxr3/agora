@@ -30,6 +30,7 @@ export function AgentTestPanel({ agentId, agentSlug }: AgentTestPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const [input, setInput] = useState('')
+  const ANON_KEY = process.env.NEXT_PUBLIC_ANON_API_KEY ?? ''
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
@@ -41,8 +42,9 @@ export function AgentTestPanel({ agentId, agentSlug }: AgentTestPanelProps) {
     const text = input.trim()
     if (!text || loading) return
 
-    if (!apiKey.trim()) {
-      setTurns(prev => [...prev, { role: 'agent', text: 'Enter your OpenAgora API key above to send messages.', isError: true }])
+    const effectiveKey = apiKey.trim() || ANON_KEY
+    if (!effectiveKey) {
+      setTurns(prev => [...prev, { role: 'agent', text: 'Enter your OpenAgora API key to send messages.', isError: true }])
       return
     }
 
@@ -57,7 +59,7 @@ export function AgentTestPanel({ agentId, agentSlug }: AgentTestPanelProps) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey.trim()}`,
+          'Authorization': `Bearer ${effectiveKey}`,
         },
         body: JSON.stringify({
           jsonrpc: '2.0',
@@ -128,7 +130,7 @@ export function AgentTestPanel({ agentId, agentSlug }: AgentTestPanelProps) {
         <div className="mb-3 flex items-center gap-2">
           <input
             type={showKey ? 'text' : 'password'}
-            placeholder="API Key (oag_...)"
+            placeholder={ANON_KEY ? 'API Key — optional, uses anon by default' : 'API Key (oag_...)'}
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
             className="flex-1 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
