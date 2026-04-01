@@ -81,6 +81,13 @@ export async function POST(request: Request) {
     await supabaseAdmin.from('agent_skills').insert(skillRows)
   }
 
+  // Auto-generate an API key for the agent
+  const { generateApiKey } = await import('@/lib/gateway/auth')
+  const { key, hash } = generateApiKey()
+  await supabaseAdmin
+    .from('api_keys')
+    .insert({ agent_id: agent.id, key_hash: hash, name: 'default' })
+
   // Re-fetch with skills
   const { data: fullAgent } = await supabaseAdmin
     .from('agents')
@@ -88,5 +95,12 @@ export async function POST(request: Request) {
     .eq('id', agent.id)
     .single()
 
-  return Response.json(fullAgent, { status: 201 })
+  return Response.json(
+    {
+      ...fullAgent,
+      api_key: key,
+      warning: 'Store this key securely. It will not be shown again.',
+    },
+    { status: 201 }
+  )
 }
