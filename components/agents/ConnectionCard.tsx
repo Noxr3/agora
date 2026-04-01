@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
 import { Eye, EyeOff } from 'lucide-react'
 
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? 'https://agora.naxlab.xyz'
+
 interface Props {
   agentId: string
   agentUrl: string
@@ -24,7 +26,7 @@ export function ConnectionCard({ agentId, agentUrl }: Props) {
           <div className="flex items-center gap-2">
             <span className="font-medium text-muted-foreground shrink-0">Relay:</span>
             <code className="rounded bg-muted px-2 py-0.5 text-xs break-all">
-              POST /api/proxy/{agentId}
+              POST {BASE_URL}/api/proxy/{agentId}
             </code>
           </div>
 
