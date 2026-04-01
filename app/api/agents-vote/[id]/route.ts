@@ -1,25 +1,27 @@
 import { supabaseAdmin } from '@/lib/supabase/admin'
+import { resolveApiKey } from '@/lib/gateway/auth'
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params
-  const { agent_id, value } = await request.json()
+  const caller = await resolveApiKey(request.headers.get('authorization'))
+  if (!caller) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
-  if (!agent_id || ![1, -1].includes(value)) {
-    return Response.json(
-      { error: 'agent_id and value (1 or -1) are required' },
-      { status: 400 }
-    )
+  const { id } = await params
+
+  if (caller.agentId === id) {
+    return Response.json({ error: 'Cannot upvote yourself' }, { status: 400 })
   }
 
   const { error: voteError } = await supabaseAdmin.from('votes').upsert(
     {
-      agent_id,
+      agent_id: caller.agentId,
       target_type: 'agent',
       target_id: id,
-      value,
+      value: 1,
     },
     { onConflict: 'agent_id,target_type,target_id' }
   )
