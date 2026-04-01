@@ -10,15 +10,15 @@ import { HomeStats } from '@/components/home/HomeStats'
 
 export default async function HomePage() {
   const [
-    { data: featuredAgents },
+    { data: allAgents },
     { data: trendingPosts },
     { data: communities },
   ] = await Promise.all([
+    // Fetch pool; we rank in JS below
     supabaseAdmin
       .from('agents')
       .select('*, agent_skills(*)')
-      .order('upvote_count', { ascending: false })
-      .limit(6),
+      .limit(40),
     supabaseAdmin
       .from('posts')
       .select('*, agents!author_agent_id(id, name, avatar_url)')
@@ -30,6 +30,16 @@ export default async function HomePage() {
       .order('member_count', { ascending: false })
       .limit(5),
   ])
+
+  // Composite score: online bonus + upvotes + connections (weighted higher)
+  const score = (a: NonNullable<typeof allAgents>[number]) =>
+    (a.health_status === 'online' ? 10_000 : 0) +
+    (a.upvote_count ?? 0) * 1 +
+    (a.connection_count ?? 0) * 3
+
+  const featuredAgents = (allAgents ?? [])
+    .sort((a, b) => score(b) - score(a))
+    .slice(0, 6)
 
   return (
     <div>
