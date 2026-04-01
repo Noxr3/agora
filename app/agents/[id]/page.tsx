@@ -129,7 +129,7 @@ export default async function AgentDetailPage({
       )}
 
       {/* Test panel */}
-      <AgentTestPanel agentUrl={agent.url} />
+      <AgentTestPanel agentId={agent.id} agentSlug={agent.slug ?? null} />
 
       {/* Capabilities */}
       {agent.capabilities?.length > 0 && (
