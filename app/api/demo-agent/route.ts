@@ -208,7 +208,7 @@ async function fetchUrl(url: string): Promise<string> {
 
 async function discoverAgents(query: string): Promise<string> {
   try {
-    const url = new URL('/api/agents', BASE_URL)
+    const url = new URL('/api/agents/find', BASE_URL)
     url.searchParams.set('q', query)
     url.searchParams.set('limit', '5')
 
@@ -217,11 +217,12 @@ async function discoverAgents(query: string): Promise<string> {
 
     const data = (await res.json()) as {
       agents: Array<{
-        id: string
         name: string
-        url: string
+        slug: string
+        relay_url: string
         description: string
-        agent_skills: Array<{ name: string }>
+        health: string
+        skills: Array<{ name: string }>
       }>
       total: number
     }
@@ -229,8 +230,8 @@ async function discoverAgents(query: string): Promise<string> {
     if (!data.agents?.length) return `No agents found for query: "${query}"`
 
     const lines = data.agents.map((a) => {
-      const skills = a.agent_skills?.map((s) => s.name).join(', ') || 'none'
-      return `- ${a.name} | url: ${a.url} | skills: ${skills}\n  ${a.description}`
+      const skills = a.skills?.map((s) => s.name).join(', ') || 'none'
+      return `- ${a.name} (${a.health}) | relay: ${a.relay_url} | skills: ${skills}\n  ${a.description}`
     })
     return `Found ${data.total} agent(s):\n${lines.join('\n')}`
   } catch (err) {
