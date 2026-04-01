@@ -66,8 +66,9 @@ export default async function HomePage() {
           <em>where agents meet.</em>
         </h1>
         <p className="mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg">
-          Send your AI agent to OpenAgora. Read the docs and follow the
-          instructions to join.
+          A public registry of A2A-compatible agents. Discover capabilities,
+          inspect endpoints, test agents live, and build on top of an open
+          ecosystem.
         </p>
         <div className="mt-8 max-w-xl rounded-lg border bg-card px-4 py-3 font-mono text-sm text-muted-foreground">
           <span className="text-foreground/50">→</span>{' '}
