@@ -38,61 +38,49 @@ export async function GET(request: Request) {
   return Response.json({ agents: filtered, total: count ?? 0, page, limit })
 }
 
-function toBaseSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-}
-
-function randomSuffix(): string {
-  return Math.random().toString(36).slice(2, 8) // 6 base-36 chars, ~2B combinations
-}
-
-async function generateSlug(name: string): Promise<string> {
-  const base = toBaseSlug(name)
-  const { data } = await supabaseAdmin.from('agents').select('id').eq('slug', base).maybeSingle()
-  // Base slug is free — use it directly
-  if (!data) return base
-  // Taken — jump straight to random suffix (O(1) regardless of duplicate count)
-  return `${base}-${randomSuffix()}`
-}
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/
 
 export async function POST(request: Request) {
   const body = await request.json()
-  const { name, url, description, provider, capabilities, skills, avatar_url, payment_schemes } =
+  const { name, url, description, provider, capabilities, skills, avatar_url, payment_schemes, slug: rawSlug } =
     body
 
-  if (!name || !url) {
+  if (!name || !url || !rawSlug) {
+    return Response.json({ error: 'name, url, and slug are required' }, { status: 400 })
+  }
+
+  const slug = String(rawSlug).toLowerCase().trim()
+  if (!SLUG_RE.test(slug)) {
     return Response.json(
-      { error: 'name and url are required' },
+      { error: 'slug must be 3–50 lowercase alphanumeric characters or hyphens, no leading/trailing hyphens' },
       { status: 400 }
     )
   }
 
-  let agent = null
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const slug = await generateSlug(name)
-    const { data, error: agentError } = await supabaseAdmin
-      .from('agents')
-      .insert({
-        name,
-        url,
-        slug,
-        description: description ?? '',
-        provider: provider ?? '',
-        capabilities: capabilities ?? [],
-        avatar_url: avatar_url ?? null,
-        payment_schemes: payment_schemes ?? [],
-      })
-      .select()
-      .single()
-
-    if (!agentError) { agent = data; break }
-    // 23505 = unique_violation — slug race condition, retry with a new slug
-    if (agentError.code !== '23505') {
-      return Response.json({ error: agentError.message }, { status: 500 })
-    }
+  const { data: existing } = await supabaseAdmin.from('agents').select('id').eq('slug', slug).maybeSingle()
+  if (existing) {
+    return Response.json({ error: `Slug "${slug}" is already taken` }, { status: 409 })
   }
-  if (!agent) {
-    return Response.json({ error: 'Failed to generate a unique slug' }, { status: 500 })
+
+  const { data: agent, error: agentError } = await supabaseAdmin
+    .from('agents')
+    .insert({
+      name,
+      url,
+      slug,
+      description: description ?? '',
+      provider: provider ?? '',
+      capabilities: capabilities ?? [],
+      avatar_url: avatar_url ?? null,
+      payment_schemes: payment_schemes ?? [],
+    })
+    .select()
+    .single()
+
+  if (agentError) {
+    const status = agentError.code === '23505' ? 409 : 500
+    const message = agentError.code === '23505' ? `Slug "${slug}" is already taken` : agentError.message
+    return Response.json({ error: message }, { status })
   }
 
   // Insert skills if provided
