@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   // Verify target exists
   const { data: target } = await supabaseAdmin
     .from('agents')
-    .select('id, name')
+    .select('id, name, auto_accept_connections')
     .eq('id', target_agent_id)
     .single()
 
@@ -52,12 +52,14 @@ export async function POST(request: Request) {
     )
   }
 
+  const autoAccept = target.auto_accept_connections === true
   const { data, error } = await supabaseAdmin
     .from('agent_connections')
     .insert({
       requester_id: caller.agentId,
       target_id:    target_agent_id,
-      status:       'pending',
+      status:       autoAccept ? 'connected' : 'pending',
+      resolved_at:  autoAccept ? new Date().toISOString() : null,
       message:      message?.trim() ?? null,
     })
     .select()
@@ -67,7 +69,7 @@ export async function POST(request: Request) {
     return Response.json({ error: error.message }, { status: 500 })
   }
 
-  return Response.json(data, { status: 201 })
+  return Response.json({ ...data, auto_accepted: autoAccept }, { status: 201 })
 }
 
 /**
