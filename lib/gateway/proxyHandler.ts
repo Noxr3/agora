@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { resolveApiKey, signGatewayHeaders } from '@/lib/gateway/auth'
 import { getTrustLevel, checkRateLimit } from '@/lib/gateway/ratelimit'
-import { verifyPayment, settlePayment, encodeSettlementHeader } from '@/lib/gateway/x402'
+import { verifyPayment, settlePayment, encodeSettlementHeader, extractPaymentDetails } from '@/lib/gateway/x402'
 
 export async function handleProxyRequest(
   request: Request,
@@ -153,26 +153,10 @@ export async function handleProxyRequest(
   // ── x402 pre-flight: if caller sent PAYMENT-SIGNATURE, settle before forwarding
   if (paymentSignature) {
     const hasCdpKeys = process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET
-    const x402Scheme = (targetAgent.payment_schemes as Array<Record<string, unknown>> | null)
-      ?.find(s => s.type === 'x402')
 
-    if (hasCdpKeys && x402Scheme && targetAgent.payment_address) {
-      const networkMap: Record<string, string> = {
-        'base': 'eip155:8453', 'base-sepolia': 'eip155:84532', 'solana': 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
-      }
-      const syntheticRequired = Buffer.from(JSON.stringify({
-        x402Version: 1,
-        accepts: [{
-          scheme: 'eip712',
-          network: networkMap[String(x402Scheme.network)] ?? `eip155:${x402Scheme.network}`,
-          asset: String(x402Scheme.asset ?? 'USDC'),
-          amount: String(x402Scheme.per_call ?? x402Scheme.amount ?? '1000'),
-          payTo: targetAgent.payment_address,
-          maxTimeoutSeconds: 60,
-        }],
-      })).toString('base64')
-
-      const verification = await verifyPayment(paymentSignature, syntheticRequired)
+    if (hasCdpKeys) {
+      // Verify using the requirements embedded in the caller's signed payload
+      const verification = await verifyPayment(paymentSignature)
       if (!verification.isValid) {
         return Response.json(
           { error: 'Payment verification failed', reason: verification.invalidReason },
@@ -180,7 +164,8 @@ export async function handleProxyRequest(
         )
       }
 
-      const settlement = await settlePayment(paymentSignature, syntheticRequired)
+      // Settle on-chain via Coinbase facilitator
+      const settlement = await settlePayment(paymentSignature)
       if (!settlement.success) {
         return Response.json(
           { error: 'Payment settlement failed', reason: settlement.errorReason },
@@ -192,19 +177,21 @@ export async function handleProxyRequest(
       upstreamPaymentResponse = encodeSettlementHeader(settlement)
       forwardHeaders['payment-response'] = upstreamPaymentResponse
 
+      // Log to payments table
+      const details = extractPaymentDetails(paymentSignature)
       await supabaseAdmin.from('payments').insert({
         caller_agent_id: caller.agentId,
         target_agent_id: targetAgent.id,
-        network:    settlement.network ?? String(x402Scheme.network ?? 'unknown'),
-        asset:      String(x402Scheme.asset ?? 'unknown'),
-        amount:     String(x402Scheme.per_call ?? x402Scheme.amount ?? '0'),
-        pay_to:     targetAgent.payment_address,
+        network:    settlement.network ?? details.network,
+        asset:      details.asset,
+        amount:     details.amount,
+        pay_to:     details.payTo,
         tx_hash:    settlement.transaction,
         status:     'settled',
         settled_at: new Date().toISOString(),
       })
     }
-    // If no CDP keys or no payment_schemes, fall through — request forwarded without payment
+    // If no CDP keys, fall through — request forwarded without settlement
   }
 
   try {

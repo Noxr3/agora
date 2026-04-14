@@ -38,25 +38,24 @@ export interface PaymentSettleResult {
 }
 
 /**
- * Verify a payment signature against payment requirements.
- * Returns whether the signature is valid and the payer address.
+ * Verify a payment signature. Uses the `accepted` requirements embedded
+ * in the signature payload itself — not a separately constructed requirements
+ * object — so there's no mismatch between what the caller signed and what
+ * we verify against.
  */
 export async function verifyPayment(
   paymentSignatureHeader: string,
-  paymentRequiredHeader: string,
 ): Promise<PaymentVerifyResult> {
   try {
     const client = getClient()
     const payload = decodePaymentSignatureHeader(paymentSignatureHeader)
-    const required = decodePaymentRequiredHeader(paymentRequiredHeader)
 
-    // Match the first accepted payment option
-    const requirements = required.accepts?.[0]
-    if (!requirements) {
-      return { isValid: false, invalidReason: 'No payment requirements in PAYMENT-REQUIRED header' }
+    // The payload contains `accepted` — the requirements the caller agreed to
+    if (!payload.accepted) {
+      return { isValid: false, invalidReason: 'Payment payload missing "accepted" requirements' }
     }
 
-    const result = await client.verify(payload, requirements)
+    const result = await client.verify(payload, payload.accepted)
     return {
       isValid: result.isValid,
       invalidReason: result.invalidReason,
@@ -72,23 +71,20 @@ export async function verifyPayment(
 
 /**
  * Settle a verified payment on-chain via Coinbase facilitator.
- * Returns the transaction hash and network.
+ * Uses `payload.accepted` as the requirements — same as verify.
  */
 export async function settlePayment(
   paymentSignatureHeader: string,
-  paymentRequiredHeader: string,
 ): Promise<PaymentSettleResult> {
   try {
     const client = getClient()
     const payload = decodePaymentSignatureHeader(paymentSignatureHeader)
-    const required = decodePaymentRequiredHeader(paymentRequiredHeader)
 
-    const requirements = required.accepts?.[0]
-    if (!requirements) {
-      return { success: false, transaction: '', network: '', errorReason: 'No payment requirements' }
+    if (!payload.accepted) {
+      return { success: false, transaction: '', network: '', errorReason: 'Payment payload missing "accepted" requirements' }
     }
 
-    const result = await client.settle(payload, requirements)
+    const result = await client.settle(payload, payload.accepted)
     return {
       success: result.success,
       transaction: result.transaction,
@@ -103,6 +99,26 @@ export async function settlePayment(
       network: '',
       errorReason: `Settlement error: ${err instanceof Error ? err.message : String(err)}`,
     }
+  }
+}
+
+/**
+ * Extract payment details from a PAYMENT-SIGNATURE header for logging.
+ */
+export function extractPaymentDetails(paymentSignatureHeader: string): {
+  network: string; asset: string; amount: string; payTo: string
+} {
+  try {
+    const payload = decodePaymentSignatureHeader(paymentSignatureHeader)
+    const a = payload.accepted
+    return {
+      network: a?.network ?? 'unknown',
+      asset:   a?.asset ?? 'unknown',
+      amount:  a?.amount ?? '0',
+      payTo:   a?.payTo ?? '',
+    }
+  } catch {
+    return { network: 'unknown', asset: 'unknown', amount: '0', payTo: '' }
   }
 }
 
