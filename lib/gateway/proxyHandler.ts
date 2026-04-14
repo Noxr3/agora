@@ -129,7 +129,7 @@ export async function handleProxyRequest(
     // Not valid JSON — let it pass through; the target agent will handle the error
   }
 
-  // ── x402: Forward PAYMENT-SIGNATURE from caller if present ───────────────
+  // ── x402: Extract PAYMENT-SIGNATURE (never forwarded to target) ──────────
   const paymentSignature = request.headers.get('payment-signature')
 
   let upstreamStatus = 502
@@ -147,8 +147,64 @@ export async function handleProxyRequest(
     'X-OpenAgora-Timestamp':   timestamp,
     'X-OpenAgora-Signature':   signature,
   }
+  // NOTE: PAYMENT-SIGNATURE is NOT forwarded to target.
+  // Relay settles first, then forwards with PAYMENT-RESPONSE (proof of payment).
+
+  // ── x402 pre-flight: if caller sent PAYMENT-SIGNATURE, settle before forwarding
   if (paymentSignature) {
-    forwardHeaders['payment-signature'] = paymentSignature
+    const hasCdpKeys = process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET
+    const x402Scheme = (targetAgent.payment_schemes as Array<Record<string, unknown>> | null)
+      ?.find(s => s.type === 'x402')
+
+    if (hasCdpKeys && x402Scheme && targetAgent.payment_address) {
+      const networkMap: Record<string, string> = {
+        'base': 'eip155:8453', 'base-sepolia': 'eip155:84532', 'solana': 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      }
+      const syntheticRequired = Buffer.from(JSON.stringify({
+        x402Version: 1,
+        accepts: [{
+          scheme: 'eip712',
+          network: networkMap[String(x402Scheme.network)] ?? `eip155:${x402Scheme.network}`,
+          asset: String(x402Scheme.asset ?? 'USDC'),
+          amount: String(x402Scheme.per_call ?? x402Scheme.amount ?? '1000'),
+          payTo: targetAgent.payment_address,
+          maxTimeoutSeconds: 60,
+        }],
+      })).toString('base64')
+
+      const verification = await verifyPayment(paymentSignature, syntheticRequired)
+      if (!verification.isValid) {
+        return Response.json(
+          { error: 'Payment verification failed', reason: verification.invalidReason },
+          { status: 402, headers: { 'X-OpenAgora-Request-ID': requestId } },
+        )
+      }
+
+      const settlement = await settlePayment(paymentSignature, syntheticRequired)
+      if (!settlement.success) {
+        return Response.json(
+          { error: 'Payment settlement failed', reason: settlement.errorReason },
+          { status: 402, headers: { 'X-OpenAgora-Request-ID': requestId } },
+        )
+      }
+
+      // Settlement successful — inject proof into forward headers
+      upstreamPaymentResponse = encodeSettlementHeader(settlement)
+      forwardHeaders['payment-response'] = upstreamPaymentResponse
+
+      await supabaseAdmin.from('payments').insert({
+        caller_agent_id: caller.agentId,
+        target_agent_id: targetAgent.id,
+        network:    settlement.network ?? String(x402Scheme.network ?? 'unknown'),
+        asset:      String(x402Scheme.asset ?? 'unknown'),
+        amount:     String(x402Scheme.per_call ?? x402Scheme.amount ?? '0'),
+        pay_to:     targetAgent.payment_address,
+        tx_hash:    settlement.transaction,
+        status:     'settled',
+        settled_at: new Date().toISOString(),
+      })
+    }
+    // If no CDP keys or no payment_schemes, fall through — request forwarded without payment
   }
 
   try {
@@ -176,7 +232,7 @@ export async function handleProxyRequest(
     latency_ms:      Date.now() - start,
   })
 
-  // ── 8. x402 payment flow ────────────────────────────────────────────────
+  // ── 8. x402 post-forward logging ─────────────────────────────────────────
 
   // 8a. Target returned 402 — log challenge, forward to caller
   if (upstreamStatus === 402 && upstreamPaymentRequired) {
@@ -201,120 +257,7 @@ export async function handleProxyRequest(
     }
   }
 
-  // 8b. Caller provided PAYMENT-SIGNATURE — verify + settle via Coinbase facilitator
-  if (paymentSignature && upstreamPaymentRequired && upstreamStatus === 402) {
-    // The upstream returned 402 even with the signature — means we need to
-    // verify + settle ourselves, then retry the request with proof
-    const hasCdpKeys = process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET
-
-    if (hasCdpKeys) {
-      const verification = await verifyPayment(paymentSignature, upstreamPaymentRequired)
-
-      if (verification.isValid) {
-        const settlement = await settlePayment(paymentSignature, upstreamPaymentRequired)
-
-        if (settlement.success) {
-          // Payment settled — log it
-          const decoded = JSON.parse(
-            Buffer.from(upstreamPaymentRequired, 'base64').toString()
-          ) as { accepts?: Array<{ network?: string; asset?: string; amount?: string; payTo?: string }> }
-          const first = decoded.accepts?.[0]
-          await supabaseAdmin.from('payments').insert({
-            caller_agent_id: caller.agentId,
-            target_agent_id: targetAgent.id,
-            network:    settlement.network ?? first?.network ?? 'unknown',
-            asset:      first?.asset ?? 'unknown',
-            amount:     first?.amount ?? '0',
-            pay_to:     first?.payTo ?? '',
-            tx_hash:    settlement.transaction,
-            status:     'settled',
-            settled_at: new Date().toISOString(),
-          })
-
-          // Retry the original request to target with settlement proof
-          const paymentResponseHeader = encodeSettlementHeader(settlement)
-          try {
-            const retryUpstream = await fetch(targetAgent.url, {
-              method: 'POST',
-              headers: {
-                ...forwardHeaders,
-                'payment-response': paymentResponseHeader,
-              },
-              body,
-              signal: AbortSignal.timeout(30_000),
-            })
-            upstreamStatus      = retryUpstream.status
-            upstreamBody        = await retryUpstream.text()
-            upstreamContentType = retryUpstream.headers.get('content-type') ?? 'application/json'
-            upstreamPaymentResponse = paymentResponseHeader
-            upstreamPaymentRequired = '' // clear — payment is settled
-          } catch {
-            // Retry failed — still return settlement info
-          }
-        } else {
-          // Settlement failed — return error to caller
-          return Response.json(
-            { error: 'Payment settlement failed', reason: settlement.errorReason },
-            { status: 402, headers: { 'X-OpenAgora-Request-ID': requestId, 'payment-required': upstreamPaymentRequired } },
-          )
-        }
-      } else {
-        return Response.json(
-          { error: 'Payment verification failed', reason: verification.invalidReason },
-          { status: 402, headers: { 'X-OpenAgora-Request-ID': requestId, 'payment-required': upstreamPaymentRequired } },
-        )
-      }
-    }
-    // If no CDP keys configured, fall through and return the 402 transparently
-  }
-
-  // 8c. Target returned 200 with PAYMENT-SIGNATURE but no settlement proof
-  //     → relay settles on behalf using target's declared payment_schemes
-  if (paymentSignature && upstreamStatus === 200 && !upstreamPaymentResponse) {
-    const hasCdpKeys = process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET
-    const x402Scheme = (targetAgent.payment_schemes as Array<Record<string, unknown>> | null)
-      ?.find(s => s.type === 'x402')
-
-    if (hasCdpKeys && x402Scheme && targetAgent.payment_address) {
-      // Construct PAYMENT-REQUIRED from the agent's declared schemes
-      const syntheticRequired = Buffer.from(JSON.stringify({
-        x402Version: 1,
-        accepts: [{
-          scheme: 'eip712',
-          network: `eip155:${x402Scheme.network === 'base' ? '8453' : x402Scheme.network === 'base-sepolia' ? '84532' : '8453'}`,
-          asset: String(x402Scheme.asset ?? 'USDC'),
-          amount: String(x402Scheme.per_call ?? x402Scheme.amount ?? '1000'),
-          payTo: targetAgent.payment_address,
-          maxTimeoutSeconds: 60,
-        }],
-      })).toString('base64')
-
-      try {
-        const verification = await verifyPayment(paymentSignature, syntheticRequired)
-        if (verification.isValid) {
-          const settlement = await settlePayment(paymentSignature, syntheticRequired)
-          if (settlement.success) {
-            upstreamPaymentResponse = encodeSettlementHeader(settlement)
-            await supabaseAdmin.from('payments').insert({
-              caller_agent_id: caller.agentId,
-              target_agent_id: targetAgent.id,
-              network:    settlement.network ?? String(x402Scheme.network ?? 'unknown'),
-              asset:      String(x402Scheme.asset ?? 'unknown'),
-              amount:     String(x402Scheme.per_call ?? x402Scheme.amount ?? '0'),
-              pay_to:     targetAgent.payment_address,
-              tx_hash:    settlement.transaction,
-              status:     'settled',
-              settled_at: new Date().toISOString(),
-            })
-          }
-        }
-      } catch {
-        // Settlement failed silently — still return the 200 response
-      }
-    }
-  }
-
-  // 8d. Transparent settlement logging (target settled directly, returned 200 + proof)
+  // 8b. Transparent settlement logging (target settled directly, returned 200 + proof)
   if (upstreamStatus === 200 && upstreamPaymentResponse && !paymentSignature) {
     try {
       const decoded = JSON.parse(
