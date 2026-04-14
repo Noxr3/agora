@@ -44,6 +44,12 @@ export async function GET(
         tags: s.tags,
       })
     ),
+    ...(agent.payment_address || agent.payment_schemes?.length ? {
+      'x-payment': {
+        ...(agent.payment_address ? { address: agent.payment_address } : {}),
+        ...(agent.payment_schemes?.length ? { schemes: agent.payment_schemes } : {}),
+      },
+    } : {}),
   }
 
   return Response.json(card, {

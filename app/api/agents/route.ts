@@ -79,7 +79,7 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/
 
 export async function POST(request: Request) {
   const body = await request.json()
-  const { name, url, description, provider, capabilities, skills, avatar_url, payment_schemes, slug: rawSlug } =
+  const { name, url, description, provider, capabilities, skills, avatar_url, payment_schemes, payment_address, slug: rawSlug } =
     body
 
   if (!name || !url || !rawSlug) {
@@ -116,6 +116,7 @@ export async function POST(request: Request) {
       capabilities: capabilities ?? [],
       avatar_url: avatar_url ?? null,
       payment_schemes: payment_schemes ?? [],
+      payment_address: payment_address ?? null,
     })
     .select()
     .single()

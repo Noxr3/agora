@@ -9,6 +9,7 @@ interface Props {
   agentId: string
   agentSlug: string | null
   agentUrl: string
+  paymentAddress?: string | null
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -31,7 +32,7 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-export function ConnectionCard({ agentId, agentSlug, agentUrl }: Props) {
+export function ConnectionCard({ agentId, agentSlug, agentUrl, paymentAddress }: Props) {
   const [showEndpoint, setShowEndpoint] = useState(false)
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://openagora.cc'
   const relayUrl = `${baseUrl}/relay/${agentSlug ?? agentId}`
@@ -83,6 +84,17 @@ export function ConnectionCard({ agentId, agentSlug, agentUrl }: Props) {
             </button>
             {showEndpoint && <CopyButton text={agentUrl} />}
           </div>
+
+          {/* Payment Address */}
+          {paymentAddress && (
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-muted-foreground shrink-0">Payment:</span>
+              <code className="rounded bg-muted px-2 py-0.5 text-xs break-all">
+                {paymentAddress}
+              </code>
+              <CopyButton text={paymentAddress} />
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -128,33 +128,45 @@ export async function handleProxyRequest(
     // Not valid JSON — let it pass through; the target agent will handle the error
   }
 
+  // ── x402: Forward PAYMENT-SIGNATURE from caller if present ───────────────
+  const paymentSignature = request.headers.get('payment-signature')
+
   let upstreamStatus = 502
   let upstreamBody = JSON.stringify({ error: 'Target agent unreachable' })
   let upstreamContentType = 'application/json'
+  let upstreamPaymentRequired = ''
+  let upstreamPaymentResponse = ''
+
+  const forwardHeaders: Record<string, string> = {
+    'Content-Type': request.headers.get('content-type') ?? 'application/json',
+    'X-OpenAgora-Caller-ID':   caller.agentId,
+    'X-OpenAgora-Caller-Name': callerAgent?.name ?? 'unknown',
+    'X-OpenAgora-Trust-Level': trustLevel,
+    'X-OpenAgora-Request-ID':  requestId,
+    'X-OpenAgora-Timestamp':   timestamp,
+    'X-OpenAgora-Signature':   signature,
+  }
+  if (paymentSignature) {
+    forwardHeaders['payment-signature'] = paymentSignature
+  }
 
   try {
     const upstream = await fetch(targetAgent.url, {
       method: 'POST',
-      headers: {
-        'Content-Type': request.headers.get('content-type') ?? 'application/json',
-        'X-OpenAgora-Caller-ID':   caller.agentId,
-        'X-OpenAgora-Caller-Name': callerAgent?.name ?? 'unknown',
-        'X-OpenAgora-Trust-Level': trustLevel,
-        'X-OpenAgora-Request-ID':  requestId,
-        'X-OpenAgora-Timestamp':   timestamp,
-        'X-OpenAgora-Signature':   signature,
-      },
+      headers: forwardHeaders,
       body,
       signal: AbortSignal.timeout(30_000),
     })
     upstreamStatus      = upstream.status
     upstreamBody        = await upstream.text()
     upstreamContentType = upstream.headers.get('content-type') ?? 'application/json'
+    upstreamPaymentRequired = upstream.headers.get('payment-required') ?? ''
+    upstreamPaymentResponse = upstream.headers.get('payment-response') ?? ''
   } catch {
     // fall through with 502 defaults
   }
 
-  // ── 7. Log ───────────────────────────────────────────────────────────────
+  // ── 7. Log proxy call ──────────────────────────────────────────────────
   await supabaseAdmin.from('proxy_calls').insert({
     target_agent_id: targetAgent.id,
     caller_agent_id: caller.agentId,
@@ -163,13 +175,61 @@ export async function handleProxyRequest(
     latency_ms:      Date.now() - start,
   })
 
+  // ── 8. x402 payment logging ────────────────────────────────────────────
+  if (upstreamStatus === 402 && upstreamPaymentRequired) {
+    // Target demands payment — log the challenge
+    try {
+      const decoded = JSON.parse(
+        Buffer.from(upstreamPaymentRequired, 'base64').toString()
+      ) as { network?: string; asset?: string; amount?: string; payTo?: string }
+      await supabaseAdmin.from('payments').insert({
+        caller_agent_id: caller.agentId,
+        target_agent_id: targetAgent.id,
+        network: decoded.network ?? 'unknown',
+        asset:   decoded.asset ?? 'unknown',
+        amount:  decoded.amount ?? '0',
+        pay_to:  decoded.payTo ?? '',
+        status:  'challenged',
+      })
+    } catch {
+      // Malformed payment header — still forward the 402
+    }
+  }
+
+  if (upstreamStatus === 200 && upstreamPaymentResponse) {
+    // Payment settled — log settlement
+    try {
+      const decoded = JSON.parse(
+        Buffer.from(upstreamPaymentResponse, 'base64').toString()
+      ) as { txHash?: string; network?: string; asset?: string; amount?: string }
+      await supabaseAdmin.from('payments').insert({
+        caller_agent_id: caller.agentId,
+        target_agent_id: targetAgent.id,
+        network:    decoded.network ?? 'unknown',
+        asset:      decoded.asset ?? 'unknown',
+        amount:     decoded.amount ?? '0',
+        pay_to:     '',
+        tx_hash:    decoded.txHash ?? null,
+        status:     'settled',
+        settled_at: new Date().toISOString(),
+      })
+    } catch {
+      // Malformed — still return 200
+    }
+  }
+
+  // ── 9. Return upstream response with x402 headers ──────────────────────
+  const responseHeaders: Record<string, string> = {
+    'Content-Type':            upstreamContentType,
+    'X-OpenAgora-Request-ID':  requestId,
+    'X-OpenAgora-Trust-Level': trustLevel,
+    'X-OpenAgora-Latency-Ms':  String(Date.now() - start),
+  }
+  if (upstreamPaymentRequired) responseHeaders['payment-required'] = upstreamPaymentRequired
+  if (upstreamPaymentResponse) responseHeaders['payment-response'] = upstreamPaymentResponse
+
   return new Response(upstreamBody, {
     status: upstreamStatus,
-    headers: {
-      'Content-Type':            upstreamContentType,
-      'X-OpenAgora-Request-ID':  requestId,
-      'X-OpenAgora-Trust-Level': trustLevel,
-      'X-OpenAgora-Latency-Ms':  String(Date.now() - start),
-    },
+    headers: responseHeaders,
   })
 }

@@ -27,7 +27,7 @@ export async function GET(
  * Updatable fields: name, description, provider, url, avatar_url,
  * capabilities, payment_schemes, skills (full replace)
  */
-const UPDATABLE = ['name', 'description', 'provider', 'url', 'avatar_url', 'capabilities', 'payment_schemes'] as const
+const UPDATABLE = ['name', 'description', 'provider', 'url', 'avatar_url', 'capabilities', 'payment_schemes', 'payment_address'] as const
 
 export async function PUT(
   request: Request,
