@@ -152,9 +152,10 @@ export async function handleProxyRequest(
 
   // ── x402 pre-flight: if caller sent PAYMENT-SIGNATURE, settle before forwarding
   if (paymentSignature) {
-    const hasCdpKeys = process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET
+    const hasFacilitator = process.env.X402_FACILITATOR_URL
+      || (process.env.CDP_API_KEY_ID && process.env.CDP_API_KEY_SECRET)
 
-    if (hasCdpKeys) {
+    if (hasFacilitator) {
       // Verify using the requirements embedded in the caller's signed payload
       const verification = await verifyPayment(paymentSignature)
       if (!verification.isValid) {

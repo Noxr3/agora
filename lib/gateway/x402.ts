@@ -5,17 +5,26 @@ import {
 } from '@x402/core/http'
 import { createFacilitatorConfig } from '@coinbase/x402'
 
-// ─── Facilitator client (Coinbase CDP) ───────────────────────────────────────
+// ─── Facilitator client ──────────────────────────────────────────────────────
+// Two modes:
+//  1. X402_FACILITATOR_URL env set → use that URL (e.g. x402.org for testnet)
+//  2. CDP_API_KEY_ID + CDP_API_KEY_SECRET set → use Coinbase CDP (mainnet)
 
 let _client: HTTPFacilitatorClient | null = null
 
 function getClient(): HTTPFacilitatorClient {
   if (!_client) {
-    const config = createFacilitatorConfig(
-      process.env.CDP_API_KEY_ID,
-      process.env.CDP_API_KEY_SECRET,
-    )
-    _client = new HTTPFacilitatorClient(config)
+    const customUrl = process.env.X402_FACILITATOR_URL
+
+    if (customUrl) {
+      _client = new HTTPFacilitatorClient({ url: customUrl })
+    } else {
+      const config = createFacilitatorConfig(
+        process.env.CDP_API_KEY_ID,
+        process.env.CDP_API_KEY_SECRET,
+      )
+      _client = new HTTPFacilitatorClient(config)
+    }
   }
   return _client
 }
